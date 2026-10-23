@@ -1,0 +1,16 @@
+# data files (raw API downloads and processed tables)
+data/
+
+# virtual environment
+myenv/
+
+# Mac and Jupyter clutter
+.DS_Store
+.ipynb_checkpoints/
+
+# python caches and secrets
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
