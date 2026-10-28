@@ -2,7 +2,7 @@
 
 Predicting each NBA player's box-score stats for their **next game**, so the predictions can be turned into **ESPN fantasy points** for a points league.
 
-> **Status: Version 1 complete, Version 2 in progress.** Version 1 trained, compared and tested one model per stat on the 2025-26 regular season. Version 2 has started with longer-term features (last 10 games and season average), which improved every stat on validation. Next up is combining the stat predictions into a fantasy-point forecast (see [Roadmap](#roadmap)).
+> **Status: Version 1 complete, Version 2 in progress.** Version 1 trained, compared and tested one model per stat on the 2025-26 regular season. Version 2 has added longer-term features (last 10 games and season average) and opponent features (what the other team gives up), and each step improved every stat on validation. Next up is combining the stat predictions into a fantasy-point forecast (see [Roadmap](#roadmap)).
 
 ---
 
@@ -30,7 +30,7 @@ Instead of predicting fantasy points directly, I predict each **raw stat** separ
 
 **Why:** the scoring lives in a single dictionary. If the league changes its rules, the predictions don't need retraining. It also shows which stats are predictable and which aren't.
 
-### 3. Features (37 in total)
+### 3. Features (47 in total)
 All features are known **before tip-off**.
 
 | Feature | What it captures |
@@ -43,10 +43,12 @@ All features are known **before tip-off**.
 | `MIN_LAST5`, `FTA_LAST5` | Recent minutes and free-throw attempts |
 | `USG_PCT_LAST5` | Recent usage rate, **weighted by minutes** |
 | `FG_PCT_LAST5` | Recent shooting %, computed as total FGM ÷ total FGA over the window, not as an average of percentages |
+| `OPP_<STAT>_ALLOWED` (one per stat) | How much of each stat **tonight's opponent** has given up per game so far this season: **matchup difficulty** *(added in Version 2)* |
 
 ### 4. Preventing data leakage
 - Every rolling and season-average feature uses `shift(1)` before `rolling()` or `expanding()`, so a game's own stats never appear in its features.
-- Data is sorted by player and date before every `shift`, `rolling` and `diff`.
+- Opponent features follow the same rule: each team's average uses only its **earlier** games (`shift(1)` + `expanding()`, grouped by team).
+- Data is sorted by player (or team) and date before every `shift`, `rolling` and `diff`, and re-sorted after every merge.
 - The train, validation and test sets are split **by date**, not at random, so the model is never trained on games played after the games it predicts:
 
 | Split | Dates | Rows |
@@ -130,6 +132,35 @@ To see whether the new features really help, the same models were trained twice 
 3. **Blocks are almost even with the baseline** (−0.7%, up from −3.3%), but still the only stat where the models don't win.
 4. **The models overfit a little more** (larger train/val gaps). This is the trade-off with adding features.
 
+### Opponent features
+Each player row gets the opponent's season-to-date average of every stat **allowed**, so the model knows whether tonight's matchup is easy or hard. How it's built:
+1. The opponent comes from the matchup text (`"LAL @ UTA"` → `UTA`).
+2. All player stats in each game are added up by opponent, which gives what each team **gave up** in each game (2,460 team-games = 30 teams × 82).
+3. Each team's average before each game is computed (`shift(1)` + `expanding()`), then merged back onto the player rows by opponent and game.
+
+A same-rows check on rebounds first confirmed the effect (ridge val MAE 1.915 → 1.906). Then all 10 stats were rerun. The rows are identical to the previous run (every baseline MAE matches), so the comparison is fair.
+
+| Stat | Before opponent features | **With opponent features** | Change |
+|---|---|---|---|
+| BLK | −0.7% (baseline won) | **+0.4%** | **+1.1** |
+| FTM | 4.1% | **5.0%** | **+0.9** |
+| TOV | 5.6% | **6.2%** | **+0.6** |
+| STL | 5.5% | **5.9%** | +0.5 |
+| FGM | 4.8% | **5.3%** | +0.5 |
+| REB | 4.2% | **4.6%** | +0.4 |
+| PTS | 4.1% | **4.5%** | +0.4 |
+| FGA | 3.2% | **3.4%** | +0.2 |
+| AST | 5.2% | **5.4%** | +0.2 |
+| 3PM | 2.9% | **3.0%** | +0.1 |
+
+*Validation set, best model per stat, % better than the 5-game baseline. PTS error went from 4.644 to 4.624 points per game.*
+
+**What the opponent features showed:**
+1. **For the first time, a model beats the baseline on all 10 stats.** Blocks, the weak spot since Version 1, now beat the baseline (linear, +0.4%).
+2. **Free throws gained the most.** Some teams foul far more than others, so the opponent matters a lot for free-throw attempts.
+3. **Three-pointers barely changed** (+0.1). I expected the opposite, but how many threes a player makes depends mostly on the player, not the defense.
+4. **Ridge is the best model on 9 of 10 stats.** The random forest overfits badly with 47 features (its PTS train/val gap grew to 0.77, while Ridge's stayed at 0.08).
+
 > **Note on the test set:** while building Version 2, the test-set cell was run once by accident with the new features. Those numbers have **not** been used for any decision. The final Version 2 test result will be reported with this note.
 
 ## Project structure
@@ -168,8 +199,9 @@ The first cell downloads the season's data from the NBA stats API and saves it t
 **Version 2**
 - [ ] Combine the best model for each stat into one **fantasy-point prediction**, and measure it against a baseline fantasy-point prediction
 - [x] New features: last 10 game and season averages for every stat
-- [ ] More new features: opponent defensive rating and pace, teammates missing through injury
-- [ ] Fix the blocks result (MAE-based loss functions, or modeling block counts directly)
+- [x] Opponent features: stats allowed by tonight's opponent, for every stat
+- [ ] More new features: opponent pace and defensive rating, teammates missing through injury
+- [x] Beat the baseline on blocks (the opponent features did it)
 - [ ] Move the notebook code into reusable scripts in `scripts/`
 - [x] Add a `.gitignore`
 - [ ] Add a `requirements.txt`
